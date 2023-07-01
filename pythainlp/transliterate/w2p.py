@@ -218,3 +218,6 @@ def pronunciate(text: str) -> str:
     """
     global _THAI_W2P
     return _THAI_W2P(text)
+
+if __name__ == "__main__":
+    print(pronunciate("โทรศัพท์"))

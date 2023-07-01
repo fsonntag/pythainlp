@@ -204,7 +204,9 @@ def pronunciate(word: str, engine: str = DEFAULT_PRONUNCIATE_ENGINE) -> str:
     if not word or not isinstance(word, str):
         return ""
 
-    # if engine == "w2p":  # has only one engine
-    from pythainlp.transliterate.w2p import pronunciate
+    if engine == "w2p":  # has only one engine
+        from pythainlp.transliterate.w2p import pronunciate
+    else:
+        from pythainlp.transliterate.w2p_tf import pronunciate
 
     return pronunciate(word)
