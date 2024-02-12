@@ -33,7 +33,7 @@ if __name__ == "__main__":
     chars = list(word) + ["</s>"]
     x = [g2idx.get(char, g2idx["<unk>"]) for char in chars]
 
-    output = my_signature(args_0=np.array(x, dtype=np.int32))
+    output = my_signature(input_1=np.array(x, dtype=np.int32))
     byte_output = output["output_1"]
     print(len(byte_output))
     print(byte_output)
