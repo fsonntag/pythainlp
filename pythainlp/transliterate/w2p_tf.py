@@ -1,3 +1,4 @@
+import json
 from typing import Union, List
 
 import numpy as np
@@ -77,11 +78,11 @@ class CustomGRUCell(tf.keras.layers.Layer):
 
         rz_ih, n_ih = (
             rzn_ih[:, : rzn_ih.shape[-1] * 2 // 3],
-            rzn_ih[:, rzn_ih.shape[-1] * 2 // 3 :],
+            rzn_ih[:, rzn_ih.shape[-1] * 2 // 3:],
         )
         rz_hh, n_hh = (
             rzn_hh[:, : rzn_hh.shape[-1] * 2 // 3],
-            rzn_hh[:, rzn_hh.shape[-1] * 2 // 3 :],
+            rzn_hh[:, rzn_hh.shape[-1] * 2 // 3:],
         )
 
         rz = self._sigmoid(rz_ih + rz_hh)
@@ -197,7 +198,7 @@ class ThaiW2PTFModel(tf.keras.Model):
         # note that g and p mean grapheme and phoneme, respectively.
         return g2idx, idx2g, p2idx, idx2p
 
-    def _encode(self, word: tf.Tensor):
+    def _encode_string(self, word: tf.Tensor):
         chars = tf.strings.unicode_split(
             word, "UTF-8"
         )  # Splitting the word into characters
@@ -210,12 +211,21 @@ class ThaiW2PTFModel(tf.keras.Model):
         )  # Getting the embeddings related to each index
         return x
 
+    def _encode_ints(self, x: tf.Tensor):
+        x = tf.nn.embedding_lookup(
+            self.enc_emb, tf.expand_dims(x, 0)
+        )  # Getting the embeddings related to each index
+        return x
+
     def _decode(self, preds):
         preds = self.idx2p(preds)
         return preds
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        enc = self._encode(inputs)
+        if inputs.dtype == tf.string:
+            enc = self._encode_string(inputs)
+        else:
+            enc = self._encode_ints(inputs)
         enc_initial_state = tf.zeros((1, self.enc_w_hh.shape[-1]), tf.float32)
         enc_output = self.enc_gru(enc, enc_initial_state)
         last_hidden = enc_output[:, -1, :]
@@ -256,8 +266,9 @@ class ThaiW2PTFModel(tf.keras.Model):
 
 
 class ThaiW2PTFWithModel:
-    def __init__(self):
+    def __init__(self, encode_in_model: bool = False):
         super().__init__()
+        self.encode_in_model = encode_in_model
         self.checkpoint = get_corpus_path(_MODEL_NAME, version="0.2")
         if self.checkpoint is None:
             download(_MODEL_NAME, version="0.2")
@@ -265,13 +276,18 @@ class ThaiW2PTFWithModel:
         self.graphemes = hp.graphemes
         self.phonemes = hp.phonemes
         self.weights = np.load(self.checkpoint, allow_pickle=True)
-        # self.model = ThaiW2PTFModel(
-        #     graphemes=self.graphemes, phonemes=self.phonemes, weights=self.weights
-        # )
-        self.model = tf.keras.models.load_model(
-            "thai_w2p_tf_model"
-        #     # , custom_objects={"ThaiW2PTFModel": ThaiW2PTFModel}
+        self.model = ThaiW2PTFModel(
+            graphemes=self.graphemes, phonemes=self.phonemes, weights=self.weights
         )
+        if not self.encode_in_model:
+            self.g2idx, self.idx2g, self.p2idx, self.idx2p = _load_vocab()
+            # self.variables = np.load(self.checkpoint, allow_pickle=True)
+            # (29, 64). (len(graphemes), emb)
+            # self.enc_emb = self.variables.item().get("encoder.emb.weight")
+        # self.model = tf.keras.models.load_model(
+        #     "thai_w2p_tf_model"
+            # , custom_objects={"ThaiW2PTFModel": ThaiW2PTFModel}
+        # )
 
     def _short_word(self, word: str) -> Union[str, None]:
         self.word = word
@@ -282,16 +298,40 @@ class ThaiW2PTFWithModel:
         return None
 
     def save_model(self):
-        word_tensor = tf.convert_to_tensor("โทรศัพท์")
-        _ = self.model(word_tensor)
+        if self.encode_in_model:
+            word_tensor = tf.convert_to_tensor("โทรศัพท์")
+            _ = self.model(word_tensor)
+        if not self.encode_in_model:
+            index_list = self._get_idx("โทรศัพท์")
+            int_tensor = tf.convert_to_tensor(index_list)
+            _ = self.model(int_tensor)
+            # nested_list = self.enc_emb.tolist()  # Convert the numpy array to a nested list
+            # Save the nested list as a JSON file
+            # with open('end_emb.json', 'w') as f:
+            #     json.dump(nested_list, f)
         self.model.save("thai_w2p_tf_model", save_format="tf")
+
+    def _get_idx(self, word: str) -> List[int]:
+        chars = list(word) + ["</s>"]
+        x = [self.g2idx.get(char, self.g2idx["<unk>"]) for char in chars]
+        return x
+
+    def _encode(self, word: str) -> np.ndarray:
+        chars = list(word) + ["</s>"]
+        x = [self.g2idx.get(char, self.g2idx["<unk>"]) for char in chars]
+        x = np.take(self.enc_emb, np.expand_dims(x, 0), axis=0)
+        return x
 
     def __call__(self, word: str) -> str:
         if not any(letter in word for letter in self.graphemes):
             pron = [word]
-        else:  # predict for oov
+        elif self.encode_in_model:
             word_tensor = tf.convert_to_tensor(word)
             pron = self.model(word_tensor)
+        else:
+            index_list = self._get_idx(word)
+            int_tensor = tf.convert_to_tensor(index_list)
+            pron = self.model(int_tensor)
         print(pron.numpy())
         return bytes.decode(b"".join(pron.numpy()))
 
@@ -451,4 +491,4 @@ if __name__ == "__main__":
     print(pronunciate("โทรศัพท์"))
     # โท-ระ-สับ
     # โท-ระ-สับ
-    # _THAI_W2P_WITH_MODEL.save_model()
+    _THAI_W2P_WITH_MODEL.save_model()

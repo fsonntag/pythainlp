@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 
+from pythainlp.transliterate.w2p_tf import _load_vocab
+
 if __name__ == "__main__":
     # Convert the model
     converter = tf.lite.TFLiteConverter.from_saved_model(
@@ -15,8 +17,8 @@ if __name__ == "__main__":
     tflite_model = converter.convert()
 
     # Save the model.
-    # with open("thai_w2p_tf_model.tflite", "wb") as f:
-    #     f.write(tflite_model)
+    with open("thai_w2p_tf_model.tflite", "wb") as f:
+        f.write(tflite_model)
 
     interpreter = tf.lite.Interpreter("thai_w2p_tf_model.tflite")
     # There is only 1 signature defined in the model,
@@ -24,14 +26,15 @@ if __name__ == "__main__":
     # If there are multiple signatures then we can pass the name.
     my_signature = interpreter.get_signature_runner()
 
-    # my_signature is callable with input as arguments.
-    word_tensor = tf.convert_to_tensor("โทรศัพท์")
-
     # output = my_signature(input_1=tf.constant(["โทรศัพท์"], shape=word_tensor.shape, dtype=tf.string))
-    output = my_signature(input_1=np.array(["โทรศัพท์"]))
-    # output = my_signature(input_1=word_tensor.numpy())
-    # 'output' is dictionary with all outputs from the inference.
-    # In this case we have single output 'result'.
+
+    word = "โทรศัพท์"
+    g2idx = _load_vocab()[0]
+    chars = list(word) + ["</s>"]
+    x = [g2idx.get(char, g2idx["<unk>"]) for char in chars]
+
+    output = my_signature(args_0=np.array(x, dtype=np.int32))
     byte_output = output["output_1"]
+    print(len(byte_output))
     print(byte_output)
     print(bytes.decode(b"".join(byte_output)))
